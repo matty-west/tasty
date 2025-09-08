@@ -155,7 +155,7 @@ if "code" in query_params:
 
 # --- UI Layout ---
 st.set_page_config(layout="wide")
-st.title("Discovery Weekly, all the time.")
+st.title("Discover Weekly, all the time.")
 
 if not st.session_state.sp:
     st.write("Please log in with Spotify to begin.")
