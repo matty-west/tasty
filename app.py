@@ -77,26 +77,27 @@ def build_user_profile(sp):
     }
 
 def generate_recommendations(profile, popularity_cap, subgenre_count, artists_per_subgenre):
-    """Generates recommendations using a weighted, proportional sampling method."""
+    """Generates recommendations using a randomized selection method."""
     exclusion_list = set(profile.get("artist_exclusion_list", []))
     genre_tree = profile.get("genre_tree", {})
 
-    weighted_genres = [
-        genre for genre, details in genre_tree.items() 
-        if genre != "Other" and details["total_weight"] > 0
-        for _ in range(details["total_weight"])
+    # MODIFICATION: Changed from weighted to uniform random selection of major genres
+    available_major_genres = [
+        genre for genre, details in genre_tree.items()
+        if details["total_weight"] > 0
     ]
     
-    if not weighted_genres:
+    if not available_major_genres:
         return ["Could not find any genres in your profile to search."]
 
     tags_to_explore = set()
     for _ in range(subgenre_count):
-        if not weighted_genres: break
-        chosen_genre = random.choice(weighted_genres)
+        # Randomly select a major genre
+        chosen_major_genre = random.choice(available_major_genres)
         
-        subgenres_in_genre = list(genre_tree[chosen_genre]["subgenres"].keys())
+        subgenres_in_genre = list(genre_tree[chosen_major_genre]["subgenres"].keys())
         if subgenres_in_genre:
+            # Randomly select a sub-genre from within the chosen major genre
             tags_to_explore.add(random.choice(subgenres_in_genre))
 
     if not tags_to_explore:
@@ -123,15 +124,18 @@ def generate_recommendations(profile, popularity_cap, subgenre_count, artists_pe
                 if info_response.status_code == 200:
                     info = info_response.json().get('artist')
                     if info and 0 < int(info.get('stats', {}).get('listeners', 0)) < popularity_cap:
-                        top_track_response = requests.get(f"http://ws.audioscrobbler.com/2.0/?method=artist.gettoptracks&artist={artist_name}&limit=1&api_key={LASTFM_API_KEY}&format=json")
+                        # MODIFICATION: Fetch top 5 tracks and choose one randomly
+                        top_track_response = requests.get(f"http://ws.audioscrobbler.com/2.0/?method=artist.gettoptracks&artist={artist_name}&limit=5&api_key={LASTFM_API_KEY}&format=json")
                         if top_track_response.status_code == 200:
                             tracks = top_track_response.json().get('toptracks', {}).get('track', [])
                             if tracks:
-                                final_recs.add(f"{tracks[0]['name']} by {tracks[0]['artist']['name']}")
+                                chosen_track = random.choice(tracks)
+                                final_recs.add(f"{chosen_track['name']} by {chosen_track['artist']['name']}")
     
     return sorted(list(final_recs))
 
-def create_spotify_playlist(sp, songs, playlist_name, profile):
+def create_spotify_playlist(sp, songs, playlist_name):
+    """Creates a Spotify playlist without a custom cover."""
     user_id = sp.current_user()['id']
     track_uris = []
     for song in songs:
@@ -149,47 +153,15 @@ def create_spotify_playlist(sp, songs, playlist_name, profile):
     for i in range(0, len(track_uris), 100):
         sp.playlist_add_items(playlist_id, track_uris[i:i+100])
 
-    # --- Generate and Upload Playlist Cover ---
-    st.write("🎨 Attempting to generate playlist cover...")
-    image_placeholder = st.empty()
+    # MODIFICATION: Removed the entire Gemini cover art generation block ("nano banana")
     
-    # Check if the Gemini API key is available in Streamlit's secrets
-    if "GEMINI_API_KEY" in st.secrets and st.secrets["GEMINI_API_KEY"]:
-        api_key = st.secrets["GEMINI_API_KEY"]
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key={api_key}"
-        
-        genre_tree = profile.get("genre_tree", {})
-        sorted_genres = sorted(genre_tree.items(), key=lambda item: item[1]['total_weight'], reverse=True)
-        top_genres = [g[0] for g in sorted_genres if g[0] != "Other"][:3]
-        prompt = f"An abstract, artistic album cover for a playlist named '{playlist_name}'. The music is a blend of {', '.join(top_genres)}. Moody, atmospheric, vibrant colors, digital art."
-
-        payload = { "contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"responseModalities": ["IMAGE"]} }
-        headers = {'Content-Type': 'application/json'}
-        
-        try:
-            response = requests.post(api_url, headers=headers, json=payload)
-            response.raise_for_status()
-            result = response.json()
-            image_b64 = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('inlineData', {}).get('data')
-            
-            if image_b64:
-                sp.playlist_upload_cover_image(playlist_id, image_b64)
-                image_placeholder.image(f"data:image/png;base64,{image_b64}", caption="Your new playlist cover!", width=200)
-                st.write("✅ Cover art successfully uploaded!")
-            else:
-                st.warning("⚠️ Could not generate cover art (model did not return an image), but the playlist was created.")
-        except Exception as e:
-            st.warning(f"⚠️ Could not generate cover art (Error: {e}), but the playlist was created.")
-    else:
-        st.warning("⚠️ Cover art generation is disabled. Add a GEMINI_API_KEY to your Streamlit secrets to enable it.")
-
     return f"Success! Listen here: {playlist['external_urls']['spotify']}"
 
 # --- Authentication ---
 auth_manager = SpotifyOAuth(
     client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET,
-    redirect_uri=SPOTIFY_REDIRECT_URI, scope="user-top-read user-library-read playlist-modify-public ugc-image-upload", cache_path=".cache"
-)
+    redirect_uri=SPOTIFY_REDIRECT_URI, scope="user-top-read user-library-read playlist-modify-public", cache_path=".cache"
+) # Note: removed 'ugc-image-upload' scope as it's no longer needed
 query_params = st.query_params
 if "code" in query_params:
     try:
@@ -239,10 +211,11 @@ else:
     with col2:
         st.header("Step 3: Create Playlist")
         if st.session_state.recommendations:
-            playlist_name = st.text_input("Playlist Name:", "what shall we call this playlist?")
+            playlist_name = st.text_input("Playlist Name:", "My Deep Cuts")
             if st.button("Create Spotify Playlist"):
                 with st.spinner("Creating playlist..."):
-                    message = create_spotify_playlist(st.session_state.sp, st.session_state.recommendations, playlist_name, st.session_state.taste_profile)
+                    # MODIFICATION: Changed function call to remove profile argument
+                    message = create_spotify_playlist(st.session_state.sp, st.session_state.recommendations, playlist_name)
                     if "Success" in message:
                         st.success("Playlist created!")
                         st.markdown(f"**[Click here to listen]({message.split(' ')[-1]})**")
@@ -250,4 +223,3 @@ else:
     st.header("Your Recommendations")
     if st.session_state.recommendations:
         st.text_area("Found Songs:", "\n".join(f"{i}. {s}" for i, s in enumerate(st.session_state.recommendations, 1)), height=300)
-
