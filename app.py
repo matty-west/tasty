@@ -149,41 +149,39 @@ def create_spotify_playlist(sp, songs, playlist_name, profile):
     for i in range(0, len(track_uris), 100):
         sp.playlist_add_items(playlist_id, track_uris[i:i+100])
 
-    # --- NEW: Generate and Upload Playlist Cover ---
-    st.write("🎨 Generating playlist cover with Nano Banana...")
+    # --- Generate and Upload Playlist Cover ---
+    st.write("🎨 Attempting to generate playlist cover...")
+    image_placeholder = st.empty()
     
-    genre_tree = profile.get("genre_tree", {})
-    sorted_genres = sorted(genre_tree.items(), key=lambda item: item[1]['total_weight'], reverse=True)
-    top_genres = [g[0] for g in sorted_genres if g[0] != "Other"][:3]
-    prompt = f"An abstract, artistic album cover for a playlist named '{playlist_name}'. The music is a blend of {', '.join(top_genres)}. Moody, atmospheric, vibrant colors, digital art."
-
-    api_key = "" # This will be provided by the environment
-    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key={api_key}"
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"responseModalities": ["IMAGE"]},
-    }
-    headers = {'Content-Type': 'application/json'}
-    
-    try:
-        response = requests.post(api_url, headers=headers, json=payload)
-        response.raise_for_status()
-        result = response.json()
+    # Check if the Gemini API key is available in Streamlit's secrets
+    if "GEMINI_API_KEY" in st.secrets and st.secrets["GEMINI_API_KEY"]:
+        api_key = st.secrets["GEMINI_API_KEY"]
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key={api_key}"
         
-        image_b64 = None
-        for part in result.get('candidates', [{}])[0].get('content', {}).get('parts', []):
-            if 'inlineData' in part:
-                image_b64 = part['inlineData']['data']
-                break
-        
-        if image_b64:
-            sp.playlist_upload_cover_image(playlist_id, image_b64)
-            st.write("✅ Cover art successfully uploaded!")
-        else:
-            st.write("⚠️ Could not generate cover art, but the playlist was created.")
+        genre_tree = profile.get("genre_tree", {})
+        sorted_genres = sorted(genre_tree.items(), key=lambda item: item[1]['total_weight'], reverse=True)
+        top_genres = [g[0] for g in sorted_genres if g[0] != "Other"][:3]
+        prompt = f"An abstract, artistic album cover for a playlist named '{playlist_name}'. The music is a blend of {', '.join(top_genres)}. Moody, atmospheric, vibrant colors, digital art."
 
-    except Exception as e:
-        st.write(f"⚠️ Could not generate or upload cover art: {e}")
+        payload = { "contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"responseModalities": ["IMAGE"]} }
+        headers = {'Content-Type': 'application/json'}
+        
+        try:
+            response = requests.post(api_url, headers=headers, json=payload)
+            response.raise_for_status()
+            result = response.json()
+            image_b64 = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('inlineData', {}).get('data')
+            
+            if image_b64:
+                sp.playlist_upload_cover_image(playlist_id, image_b64)
+                image_placeholder.image(f"data:image/png;base64,{image_b64}", caption="Your new playlist cover!", width=200)
+                st.write("✅ Cover art successfully uploaded!")
+            else:
+                st.warning("⚠️ Could not generate cover art (model did not return an image), but the playlist was created.")
+        except Exception as e:
+            st.warning(f"⚠️ Could not generate cover art (Error: {e}), but the playlist was created.")
+    else:
+        st.warning("⚠️ Cover art generation is disabled. Add a GEMINI_API_KEY to your Streamlit secrets to enable it.")
 
     return f"Success! Listen here: {playlist['external_urls']['spotify']}"
 
