@@ -300,11 +300,11 @@ def build_user_profile(sp):
 
 # --- Enhanced Recommendation Engine ---
 def generate_recommendations(profile, popularity_cap, subgenre_count, artists_per_subgenre, diversity_factor=0.7):
-    """Enhanced recommendation generation with weighted selection and quality scoring."""
+    """Enhanced recommendation generation with anti-bias measures for genre balance."""
     exclusion_list = set(profile.get("artist_exclusion_list", []))
     genre_tree = profile.get("genre_tree", {})
     
-    # Use weighted random selection based on user's actual preferences
+    # Get available genres with their weights
     available_genres = [(genre, details["normalized_weight"]) 
                        for genre, details in genre_tree.items() 
                        if details["total_weight"] > 0]
@@ -312,41 +312,70 @@ def generate_recommendations(profile, popularity_cap, subgenre_count, artists_pe
     if not available_genres:
         return ["Could not find any genres in your profile to search."]
     
-    # Select genres using weighted probabilities
+    # ANTI-BIAS MEASURE 1: Genre Selection with Proportional Limits
     genres, weights = zip(*available_genres)
-    selected_genres = np.random.choice(
-        genres, 
-        size=min(subgenre_count, len(genres)), 
-        replace=False,
-        p=np.array(weights) / sum(weights)
-    )
+    genre_weights = np.array(weights) / sum(weights)
     
-    # For each selected genre, pick subgenres
+    # Limit any single genre to maximum 50% of selections (adjustable)
+    max_genre_proportion = 0.5
+    capped_weights = np.minimum(genre_weights, max_genre_proportion)
+    capped_weights = capped_weights / capped_weights.sum()  # Re-normalize
+    
+    # Select genres using the capped weights
+    num_genres_to_select = min(subgenre_count, len(genres))
+    selected_genres_with_counts = {}
+    
+    # Distribute subgenre slots across genres more evenly
+    for _ in range(subgenre_count):
+        selected_genre = np.random.choice(genres, p=capped_weights)
+        selected_genres_with_counts[selected_genre] = selected_genres_with_counts.get(selected_genre, 0) + 1
+    
+    # ANTI-BIAS MEASURE 2: Limit subgenres per genre
+    max_subgenres_per_genre = max(3, subgenre_count // len(available_genres) + 1)
+    for genre in list(selected_genres_with_counts.keys()):
+        if selected_genres_with_counts[genre] > max_subgenres_per_genre:
+            selected_genres_with_counts[genre] = max_subgenres_per_genre
+    
+    # For each selected genre, pick subgenres with bias reduction
     tags_to_explore = []
-    for genre in selected_genres:
+    for genre, count in selected_genres_with_counts.items():
         subgenres = genre_tree[genre]["subgenres"]
         if subgenres:
-            # Weight subgenres by their popularity in user's profile
             subgenre_items = list(subgenres.items())
-            if len(subgenre_items) > 1:
-                subgenre_names, subgenre_weights = zip(*subgenre_items)
-                # Add some randomness for diversity
-                adjusted_weights = np.array(subgenre_weights) ** diversity_factor
-                selected_subgenre = np.random.choice(
-                    subgenre_names,
-                    p=adjusted_weights / adjusted_weights.sum()
-                )
-            else:
-                selected_subgenre = subgenre_items[0][0]
             
-            tags_to_explore.append((selected_subgenre, genre))
+            if len(subgenre_items) <= count:
+                # Use all subgenres if we don't have enough
+                for subgenre_name, _ in subgenre_items:
+                    tags_to_explore.append((subgenre_name, genre))
+            else:
+                # ANTI-BIAS MEASURE 3: Subgenre selection with diversity
+                subgenre_names, subgenre_weights = zip(*subgenre_items)
+                
+                # Apply diversity factor to weights (higher diversity = more random)
+                if diversity_factor < 0.8:
+                    adjusted_weights = np.array(subgenre_weights) ** (1 - diversity_factor)
+                else:
+                    # High diversity mode: nearly uniform selection
+                    adjusted_weights = np.ones(len(subgenre_weights))
+                
+                adjusted_weights = adjusted_weights / adjusted_weights.sum()
+                
+                # Select multiple subgenres without replacement
+                selected_indices = np.random.choice(
+                    len(subgenre_names), 
+                    size=count,
+                    replace=False,
+                    p=adjusted_weights
+                )
+                
+                for idx in selected_indices:
+                    tags_to_explore.append((subgenre_names[idx], genre))
     
     if not tags_to_explore:
         return ["Could not select any sub-genres to explore."]
     
-    # Enhanced recommendation collection
-    final_recs = []
-    recommendation_scores = []
+    # Enhanced recommendation collection with genre balancing
+    recommendations_by_genre = defaultdict(list)
     
     for tag, parent_genre in tags_to_explore:
         cache_key = f"tag_artists_{tag}"
@@ -355,7 +384,7 @@ def generate_recommendations(profile, popularity_cap, subgenre_count, artists_pe
             'tag': tag,
             'api_key': LASTFM_API_KEY,
             'format': 'json',
-            'limit': min(200, artists_per_subgenre * 10)  # Get more artists to choose from
+            'limit': min(200, artists_per_subgenre * 8)  # Get more options
         }
         
         data = cached_lastfm_request('http://ws.audioscrobbler.com/2.0/', params, cache_key)
@@ -386,28 +415,33 @@ def generate_recommendations(profile, popularity_cap, subgenre_count, artists_pe
                     artist_info = info_data['artist']
                     listener_count = int(artist_info.get('stats', {}).get('listeners', 0))
                     
-                    if 1000 < listener_count < popularity_cap:  # Minimum threshold to filter out very obscure artists
-                        # Calculate quality score
+                    if 1000 < listener_count < popularity_cap:
+                        # ANTI-BIAS MEASURE 4: Genre-aware scoring
                         popularity_score = min(listener_count / popularity_cap, 1.0)
-                        tag_relevance = float(artist_data.get('rank', 100)) / 100.0
+                        tag_relevance = 1.0 - (float(artist_data.get('rank', 100)) / 100.0)
                         
-                        # Bonus for artists in user's preferred genres
+                        # Reduce genre bonus to prevent amplification
                         genre_bonus = 1.0
-                        if parent_genre in profile.get("genre_tree", {}):
-                            if artist_name in profile["genre_tree"][parent_genre].get("artists", []):
-                                genre_bonus = 0.5  # Lower bonus to avoid recommending too similar artists
-                            else:
-                                genre_bonus = 1.2
+                        user_genre_weight = genre_tree[parent_genre]["normalized_weight"]
+                        
+                        # For over-represented genres, reduce the bonus
+                        if user_genre_weight > 0.3:  # If genre is >30% of user's taste
+                            genre_bonus = 0.8  # Slight penalty
+                        elif artist_name in profile.get("genre_tree", {}).get(parent_genre, {}).get("artists", []):
+                            genre_bonus = 0.6  # Known artist penalty
+                        else:
+                            genre_bonus = 1.1  # Small bonus for new artists in your genres
                         
                         total_score = (popularity_score * 0.4 + 
-                                     (1.0 - tag_relevance) * 0.4 + 
+                                     tag_relevance * 0.4 + 
                                      genre_bonus * 0.2)
                         
                         scored_artists.append((artist_name, total_score, listener_count))
             
-            # Select best artists from this tag
+            # Select best artists from this tag, but limit per genre
             scored_artists.sort(key=lambda x: x[1], reverse=True)
-            selected_artists = scored_artists[:artists_per_subgenre]
+            max_artists_this_tag = min(artists_per_subgenre, len(scored_artists))
+            selected_artists = scored_artists[:max_artists_this_tag]
             
             # Get tracks for selected artists
             for artist_name, score, _ in selected_artists:
@@ -415,7 +449,7 @@ def generate_recommendations(profile, popularity_cap, subgenre_count, artists_pe
                 track_params = {
                     'method': 'artist.gettoptracks',
                     'artist': artist_name,
-                    'limit': 10,
+                    'limit': 8,  # Fewer tracks to check per artist
                     'api_key': LASTFM_API_KEY,
                     'format': 'json'
                 }
@@ -425,33 +459,39 @@ def generate_recommendations(profile, popularity_cap, subgenre_count, artists_pe
                 if track_data and 'toptracks' in track_data and 'track' in track_data['toptracks']:
                     tracks = track_data['toptracks']['track']
                     if tracks:
-                        # Select track based on popularity and diversity
-                        if len(tracks) > 5:
-                            # Prefer tracks from the top 5 but add some randomness
-                            selected_track = random.choice(tracks[:5])
+                        # Select track with some randomness
+                        if len(tracks) >= 3:
+                            selected_track = random.choice(tracks[:3])  # Top 3 tracks
                         else:
                             selected_track = random.choice(tracks)
                         
                         recommendation = f"{selected_track['name']} by {selected_track['artist']['name']}"
-                        final_recs.append(recommendation)
-                        recommendation_scores.append(score)
+                        recommendations_by_genre[parent_genre].append((recommendation, score))
     
-    # Remove duplicates while preserving scores
+    # ANTI-BIAS MEASURE 5: Final genre balancing
+    final_recs = []
+    
+    # Ensure no genre contributes more than 60% of final recommendations
+    max_per_genre = max(1, int(len(tags_to_explore) * artists_per_subgenre * 0.6))
+    
+    for genre, recs_with_scores in recommendations_by_genre.items():
+        # Sort by score and limit per genre
+        recs_with_scores.sort(key=lambda x: x[1], reverse=True)
+        limited_recs = recs_with_scores[:max_per_genre]
+        final_recs.extend([rec for rec, _ in limited_recs])
+    
+    # Remove duplicates and shuffle for variety
     seen = set()
-    filtered_recs = []
-    filtered_scores = []
-    
-    for rec, score in zip(final_recs, recommendation_scores):
+    unique_recs = []
+    for rec in final_recs:
         if rec not in seen:
             seen.add(rec)
-            filtered_recs.append(rec)
-            filtered_scores.append(score)
+            unique_recs.append(rec)
     
-    # Sort by score and return top recommendations
-    paired = list(zip(filtered_recs, filtered_scores))
-    paired.sort(key=lambda x: x[1], reverse=True)
+    # Shuffle to mix genres rather than clustering
+    random.shuffle(unique_recs)
     
-    return [rec for rec, _ in paired]
+    return unique_recs
 
 def create_spotify_playlist(sp, songs, playlist_name):
     """Creates a Spotify playlist with improved search matching."""
