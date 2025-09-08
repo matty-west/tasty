@@ -192,7 +192,7 @@ def build_user_profile(sp):
     
     exclusion_list = {artist['name'] for item in all_liked_tracks for artist in item['track']['artists']}
     
-    yield "status", "Gathering genre insights from Last.fm..."
+    yield "status", "Gathering genre insights from various resources..."
     yield "progress", 0.25
     
     # Enhanced tag collection with confidence weighting
@@ -605,7 +605,6 @@ elif not st.session_state.taste_profile:
         - **Genre classification** using fuzzy matching and exclusion rules
         - **Audio characteristics** from your saved tracks (danceability, energy, etc.)
         - **Artist popularity preferences** and discovery patterns
-        - **Last.fm tags** with confidence weighting
         """)
     
     if st.button("🔍 Build My Enhanced Taste Profile", type="primary"):
@@ -696,17 +695,46 @@ else:
     with col2:
         st.header("📝 Create Playlist")
         if st.session_state.recommendations:
-            playlist_name = st.text_input(
-                "Playlist Name:", 
-                f"Discovery Mix {datetime.now().strftime('%m/%d')}"
+            # Analyze playlist sentiment for AI features
+            sentiment, vibe_tags = analyze_playlist_sentiment(
+                st.session_state.recommendations, 
+                st.session_state.taste_profile
             )
             
-            if st.button("🎵 Create Spotify Playlist", type="primary"):
+            # Generate AI playlist name if Gemini is available
+            if GEMINI_AVAILABLE:
+                if st.button("🤖 Generate Playlist Name", help="Let's create a creative name based on your music's vibe"):
+                    with st.spinner("🎨 Analyzing your music's vibe..."):
+                        ai_name = generate_playlist_name(sentiment, vibe_tags, st.session_state.taste_profile)
+                        st.session_state['suggested_name'] = ai_name
+                
+                # Use AI-generated name or fallback
+                default_name = st.session_state.get('suggested_name', f"Discovery Mix {datetime.now().strftime('%m/%d')}")
+            else:
+                default_name = f"Discovery Mix {datetime.now().strftime('%m/%d')}"
+            
+            playlist_name = st.text_input("Playlist Name:", default_name)
+            
+            # Show sentiment analysis
+            with st.expander("🎭 Playlist Vibe Analysis", expanded=False):
+                st.write(f"**Primary Sentiment:** {sentiment.title()}")
+                st.write(f"**Vibe Tags:** {', '.join(vibe_tags[:4])}")
+                if GEMINI_AVAILABLE:
+                    st.write("*AI will use this analysis to generate playlist artwork and names*")
+            
+            # Create playlist button
+            create_button_text = "🎵 Create Playlist"
+            if GEMINI_AVAILABLE:
+                create_button_text += " + AI Cover"
+            
+            if st.button(create_button_text, type="primary"):
                 with st.spinner("Creating your personalized playlist..."):
                     message = create_spotify_playlist(
                         st.session_state.sp, 
                         st.session_state.recommendations, 
-                        playlist_name
+                        playlist_name,
+                        sentiment,
+                        vibe_tags
                     )
                     
                 if "Success" in message:
@@ -714,6 +742,9 @@ else:
                     # Extract URL from message
                     url = message.split("Listen here: ")[-1]
                     st.markdown(f"**[🎧 Open in Spotify]({url})**")
+                    
+                    if GEMINI_AVAILABLE:
+                        st.info("🎨 Cover concept generated! (Note: Actual cover upload requires additional Spotify permissions)")
                 else:
                     st.error(message)
         else:
