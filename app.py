@@ -81,8 +81,6 @@ def generate_recommendations(profile, popularity_cap, subgenre_count, artists_pe
     exclusion_list = set(profile.get("artist_exclusion_list", []))
     genre_tree = profile.get("genre_tree", {})
 
-    # --- NEW: Weighted Genre Selection Logic ---
-    # Create a list where each main genre appears a number of times equal to its weight
     weighted_genres = [
         genre for genre, details in genre_tree.items() 
         if genre != "Other" and details["total_weight"] > 0
@@ -93,19 +91,16 @@ def generate_recommendations(profile, popularity_cap, subgenre_count, artists_pe
         return ["Could not find any genres in your profile to search."]
 
     tags_to_explore = set()
-    # Perform a weighted random selection of main genres
     for _ in range(subgenre_count):
         if not weighted_genres: break
         chosen_genre = random.choice(weighted_genres)
         
-        # Then, pick a random sub-genre from within that chosen main genre
         subgenres_in_genre = list(genre_tree[chosen_genre]["subgenres"].keys())
         if subgenres_in_genre:
             tags_to_explore.add(random.choice(subgenres_in_genre))
 
     if not tags_to_explore:
         return ["Could not select any sub-genres to explore."]
-    # --- END NEW LOGIC ---
     
     final_recs = set()
     for tag in tags_to_explore:
@@ -136,7 +131,7 @@ def generate_recommendations(profile, popularity_cap, subgenre_count, artists_pe
     
     return sorted(list(final_recs))
 
-def create_spotify_playlist(sp, songs, playlist_name):
+def create_spotify_playlist(sp, songs, playlist_name, profile):
     user_id = sp.current_user()['id']
     track_uris = []
     for song in songs:
@@ -147,15 +142,55 @@ def create_spotify_playlist(sp, songs, playlist_name):
                 track_uris.append(items[0]['uri'])
         except ValueError: pass
     if not track_uris: return "Could not find any songs on Spotify."
+    
     playlist = sp.user_playlist_create(user=user_id, name=playlist_name, public=True)
+    playlist_id = playlist['id']
+    
     for i in range(0, len(track_uris), 100):
-        sp.playlist_add_items(playlist['id'], track_uris[i:i+100])
+        sp.playlist_add_items(playlist_id, track_uris[i:i+100])
+
+    # --- NEW: Generate and Upload Playlist Cover ---
+    st.write("🎨 Generating playlist cover with Nano Banana...")
+    
+    genre_tree = profile.get("genre_tree", {})
+    sorted_genres = sorted(genre_tree.items(), key=lambda item: item[1]['total_weight'], reverse=True)
+    top_genres = [g[0] for g in sorted_genres if g[0] != "Other"][:3]
+    prompt = f"An abstract, artistic album cover for a playlist named '{playlist_name}'. The music is a blend of {', '.join(top_genres)}. Moody, atmospheric, vibrant colors, digital art."
+
+    api_key = "" # This will be provided by the environment
+    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key={api_key}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"responseModalities": ["IMAGE"]},
+    }
+    headers = {'Content-Type': 'application/json'}
+    
+    try:
+        response = requests.post(api_url, headers=headers, json=payload)
+        response.raise_for_status()
+        result = response.json()
+        
+        image_b64 = None
+        for part in result.get('candidates', [{}])[0].get('content', {}).get('parts', []):
+            if 'inlineData' in part:
+                image_b64 = part['inlineData']['data']
+                break
+        
+        if image_b64:
+            sp.playlist_upload_cover_image(playlist_id, image_b64)
+            st.write("✅ Cover art successfully uploaded!")
+        else:
+            st.write("⚠️ Could not generate cover art, but the playlist was created.")
+
+    except Exception as e:
+        st.write(f"⚠️ Could not generate or upload cover art: {e}")
+
     return f"Success! Listen here: {playlist['external_urls']['spotify']}"
 
 # --- Authentication ---
 auth_manager = SpotifyOAuth(
     client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET,
-    redirect_uri=SPOTIFY_REDIRECT_URI, scope="user-top-read user-library-read playlist-modify-public", cache_path=".cache"
+    redirect_uri=SPOTIFY_REDIRECT_URI, scope="user-top-read user-library-read playlist-modify-public ugc-image-upload", cache_path=".cache"
 )
 query_params = st.query_params
 if "code" in query_params:
@@ -209,7 +244,7 @@ else:
             playlist_name = st.text_input("Playlist Name:", "what shall we call this playlist?")
             if st.button("Create Spotify Playlist"):
                 with st.spinner("Creating playlist..."):
-                    message = create_spotify_playlist(st.session_state.sp, st.session_state.recommendations, playlist_name)
+                    message = create_spotify_playlist(st.session_state.sp, st.session_state.recommendations, playlist_name, st.session_state.taste_profile)
                     if "Success" in message:
                         st.success("Playlist created!")
                         st.markdown(f"**[Click here to listen]({message.split(' ')[-1]})**")
