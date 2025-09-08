@@ -37,7 +37,7 @@ def build_user_profile(sp):
     top_artists_results = sp.current_user_top_artists(limit=50, time_range='long_term')
     seed_artists = [artist['name'] for artist in top_artists_results['items']]
     
-    yield "status", "Building exclusion list from your liked songs..."
+    yield "status", "taking a peek at your listening history..."
     yield "progress", 0.2
     all_liked_tracks = []
     liked_results = sp.current_user_saved_tracks(limit=50)
@@ -47,7 +47,7 @@ def build_user_profile(sp):
         all_liked_tracks.extend(liked_results['items'])
     exclusion_list = {artist['name'] for item in all_liked_tracks for artist in item['track']['artists']}
 
-    yield "status", "Analyzing your taste with Last.fm tags..."
+    yield "status", "analyzing your taste..."
     yield "progress", 0.4
     tag_counts = Counter()
     for i, artist_name in enumerate(seed_artists):
