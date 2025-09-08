@@ -696,46 +696,16 @@ else:
     with col2:
         st.header("📝 Create Playlist")
         if st.session_state.recommendations:
-            # Analyze playlist sentiment for AI features
-            sentiment, vibe_tags = analyze_playlist_sentiment(
-                st.session_state.recommendations, 
-                st.session_state.taste_profile
-            )
-            
-            # Generate AI playlist name if Gemini is available
-            if GEMINI_AVAILABLE:
-                if st.button("🤖 Generate AI Playlist Name", help="Let AI create a creative name based on your music's vibe"):
-                    with st.spinner("🎨 AI is analyzing your music's vibe..."):
-                        ai_name = generate_playlist_name(sentiment, vibe_tags, st.session_state.taste_profile)
-                        st.session_state['suggested_name'] = ai_name
-                
-                # Use AI-generated name or fallback
-                default_name = st.session_state.get('suggested_name', f"Discovery Mix {datetime.now().strftime('%m/%d')}")
-            else:
-                default_name = f"Discovery Mix {datetime.now().strftime('%m/%d')}"
-            
+            # Simple playlist name with date
+            default_name = f"Discovery Mix {datetime.now().strftime('%m/%d')}"
             playlist_name = st.text_input("Playlist Name:", default_name)
             
-            # Show sentiment analysis
-            with st.expander("🎭 Playlist Vibe Analysis", expanded=False):
-                st.write(f"**Primary Sentiment:** {sentiment.title()}")
-                st.write(f"**Vibe Tags:** {', '.join(vibe_tags[:4])}")
-                if GEMINI_AVAILABLE:
-                    st.write("*AI will use this analysis to generate playlist artwork and names*")
-            
-            # Create playlist button
-            create_button_text = "🎵 Create Playlist"
-            if GEMINI_AVAILABLE:
-                create_button_text += " + AI Cover"
-            
-            if st.button(create_button_text, type="primary"):
-                with st.spinner("Creating your personalized playlist with AI enhancements..."):
+            if st.button("🎵 Create Playlist", type="primary"):
+                with st.spinner("Creating your personalized playlist..."):
                     message = create_spotify_playlist(
                         st.session_state.sp, 
                         st.session_state.recommendations, 
-                        playlist_name,
-                        sentiment,
-                        vibe_tags
+                        playlist_name
                     )
                     
                 if "Success" in message:
@@ -743,9 +713,6 @@ else:
                     # Extract URL from message
                     url = message.split("Listen here: ")[-1]
                     st.markdown(f"**[🎧 Open in Spotify]({url})**")
-                    
-                    if GEMINI_AVAILABLE:
-                        st.info("🎨 AI cover concept generated! (Note: Actual cover upload requires additional Spotify permissions)")
                 else:
                     st.error(message)
         else:
