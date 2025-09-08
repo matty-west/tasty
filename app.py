@@ -97,9 +97,15 @@ def generate_recommendations(profile, popularity_cap, similar_artist_limit, seed
     bridge_artist_seeds = random.sample(bridge_artists, min(len(bridge_artists), seed_artist_count))
     final_recs = set()
     for artist_name in bridge_artist_seeds:
-        similar_artists = [artist['name'] for artist in requests.get(f"http://ws.audioscrobbler.com/2.0/?method=artist.getsimilar&artist={artist_name}&limit={similar_artist_limit}&api_key={LASTFM_API_KEY}&format=json").json().get('similarartists', {}).get('artist', [])]
+        # Fetch a larger pool of similar artists
+        similar_artists_pool = [artist['name'] for artist in requests.get(f"http://ws.audioscrobbler.com/2.0/?method=artist.getsimilar&artist={artist_name}&limit={similar_artist_limit}&api_key={LASTFM_API_KEY}&format=json").json().get('similarartists', {}).get('artist', [])]
         time.sleep(0.1)
-        for sim_artist in similar_artists:
+        
+        # Randomly sample from that pool to ensure variety
+        explore_count = max(1, similar_artist_limit // 2) # Explore about half of the artists found
+        artists_to_explore = random.sample(similar_artists_pool, min(len(similar_artists_pool), explore_count))
+
+        for sim_artist in artists_to_explore:
             if sim_artist in exclusion_list: continue
             info_response = requests.get(f"http://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist={sim_artist}&api_key={LASTFM_API_KEY}&format=json")
             if info_response.status_code == 200:
@@ -169,7 +175,11 @@ else:
     
     st.sidebar.header("Recommendation Controls")
     pop_cap = st.sidebar.slider("Popularity Slider", 10000, 1000000, 500000, 10000)
-    similar_artist_limit = st.sidebar.slider("Discovery Breadth", 5, 50, 25)
+    similar_artist_limit = st.sidebar.slider(
+        "Discovery Breadth", 
+        5, 50, 25,
+        help="Controls the size of the artist pool to randomly sample from for each bridge artist."
+    )
     seed_count = st.sidebar.slider("Number of Seed Artists", 5, 50, 15)
 
     col1, col2 = st.columns([1, 1])
@@ -177,7 +187,6 @@ else:
         st.header("Step 2: Get Recommendations")
         if st.button("Find New Music"):
             with st.spinner("Analyzing profile and finding artists..."):
-                # CORRECTED: The extra '[]' argument has been removed
                 recs = generate_recommendations(st.session_state.taste_profile, pop_cap, similar_artist_limit, seed_count)
                 st.session_state.recommendations = recs
             st.success(f"Found {len(recs)} new songs!")
