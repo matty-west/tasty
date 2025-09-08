@@ -4,3 +4,4 @@ requests
 numpy
 fuzzywuzzy
 python-Levenshtein
+python-dotenv
