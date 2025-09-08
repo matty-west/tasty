@@ -192,7 +192,7 @@ def build_user_profile(sp):
     
     exclusion_list = {artist['name'] for item in all_liked_tracks for artist in item['track']['artists']}
     
-    yield "status", "Gathering genre insights from various resources..."
+    yield "status", "Gathering genre insights from Last.fm..."
     yield "progress", 0.25
     
     # Enhanced tag collection with confidence weighting
@@ -605,6 +605,7 @@ elif not st.session_state.taste_profile:
         - **Genre classification** using fuzzy matching and exclusion rules
         - **Audio characteristics** from your saved tracks (danceability, energy, etc.)
         - **Artist popularity preferences** and discovery patterns
+        - **Last.fm tags** with confidence weighting
         """)
     
     if st.button("🔍 Build My Enhanced Taste Profile", type="primary"):
@@ -703,8 +704,8 @@ else:
             
             # Generate AI playlist name if Gemini is available
             if GEMINI_AVAILABLE:
-                if st.button("🤖 Generate Playlist Name", help="Let's create a creative name based on your music's vibe"):
-                    with st.spinner("🎨 Analyzing your music's vibe..."):
+                if st.button("🤖 Generate AI Playlist Name", help="Let AI create a creative name based on your music's vibe"):
+                    with st.spinner("🎨 AI is analyzing your music's vibe..."):
                         ai_name = generate_playlist_name(sentiment, vibe_tags, st.session_state.taste_profile)
                         st.session_state['suggested_name'] = ai_name
                 
@@ -728,7 +729,7 @@ else:
                 create_button_text += " + AI Cover"
             
             if st.button(create_button_text, type="primary"):
-                with st.spinner("Creating your personalized playlist..."):
+                with st.spinner("Creating your personalized playlist with AI enhancements..."):
                     message = create_spotify_playlist(
                         st.session_state.sp, 
                         st.session_state.recommendations, 
@@ -744,7 +745,7 @@ else:
                     st.markdown(f"**[🎧 Open in Spotify]({url})**")
                     
                     if GEMINI_AVAILABLE:
-                        st.info("🎨 Cover concept generated! (Note: Actual cover upload requires additional Spotify permissions)")
+                        st.info("🎨 AI cover concept generated! (Note: Actual cover upload requires additional Spotify permissions)")
                 else:
                     st.error(message)
         else:
