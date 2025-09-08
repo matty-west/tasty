@@ -36,7 +36,7 @@ def build_user_profile(sp):
     top_artists_results = sp.current_user_top_artists(limit=50, time_range='long_term')
     seed_artists = [artist['name'] for artist in top_artists_results['items']]
     
-    yield "status", "Building exclusion list from your liked songs..."
+    yield "status", "taking a look under the hood..."
     yield "progress", 0.2
     all_liked_tracks = []
     liked_results = sp.current_user_saved_tracks(limit=50)
@@ -46,7 +46,7 @@ def build_user_profile(sp):
         all_liked_tracks.extend(liked_results['items'])
     exclusion_list = {artist['name'] for item in all_liked_tracks for artist in item['track']['artists']}
 
-    yield "status", "Analyzing your taste with Last.fm tags..."
+    yield "status", "judging your music taste..."
     yield "progress", 0.4
     tag_counts = Counter()
     for i, artist_name in enumerate(seed_artists):
@@ -155,7 +155,7 @@ if "code" in query_params:
 
 # --- UI Layout ---
 st.set_page_config(layout="wide")
-st.title("🎵 Music Recommender")
+st.title("Discovery Weekly, all the time.")
 
 if not st.session_state.sp:
     st.write("Please log in with Spotify to begin.")
@@ -176,9 +176,9 @@ else:
     st.success("Your taste profile is loaded. Let's find some music!")
     
     st.sidebar.header("Recommendation Controls")
-    pop_cap = st.sidebar.slider("Popularity Cap", 10000, 1000000, 500000, 10000, help="Artists with fewer listeners than this are considered 'lesser-known'.")
-    subgenre_count = st.sidebar.slider("Number of Sub-Genres to Explore", 5, 50, 15, help="How many of your niche sub-genres to use as starting points.")
-    artists_per_subgenre = st.sidebar.slider("Artists per Sub-Genre", 1, 10, 3, help="How many random artists to check within each selected sub-genre.")
+    pop_cap = st.sidebar.slider("Popularity Cap", 10000, 1000000, 500000, 10000, help="Do you want deep cuts or mainstream hits?")
+    subgenre_count = st.sidebar.slider("Number of Genres to Explore", 5, 50, 15, help="How many of your niche sub-genres to use as starting points.")
+    artists_per_subgenre = st.sidebar.slider("Artists per Genre", 1, 10, 3, help="How many random artists to check within each selected sub-genre.")
 
     col1, col2 = st.columns([1, 1])
     with col1:
@@ -191,7 +191,7 @@ else:
     with col2:
         st.header("Step 3: Create Playlist")
         if st.session_state.recommendations:
-            playlist_name = st.text_input("Playlist Name:", "Random Discovery")
+            playlist_name = st.text_input("Playlist Name:", "what shall we call this playlist?")
             if st.button("Create Spotify Playlist"):
                 with st.spinner("Creating playlist..."):
                     message = create_spotify_playlist(st.session_state.sp, st.session_state.recommendations, playlist_name)
