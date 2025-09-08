@@ -1,3 +1,6 @@
-requests
-python-dotenv
+streamlit
 spotipy
+requests
+numpy
+fuzzywuzzy
+python-Levenshtein
