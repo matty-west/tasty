@@ -77,22 +77,38 @@ def build_user_profile(sp):
     }
 
 def generate_recommendations(profile, popularity_cap, subgenre_count, artists_per_subgenre):
-    """Generates recommendations using the new Tag-Based Random Discovery method."""
+    """Generates recommendations using a weighted, proportional sampling method."""
     exclusion_list = set(profile.get("artist_exclusion_list", []))
     genre_tree = profile.get("genre_tree", {})
 
-    # Create a flat list of all sub-genre tags from the user's profile
-    all_subgenres = [tag for genre_details in genre_tree.values() for tag in genre_details.get("subgenres", {}).keys()]
+    # --- NEW: Weighted Genre Selection Logic ---
+    # Create a list where each main genre appears a number of times equal to its weight
+    weighted_genres = [
+        genre for genre, details in genre_tree.items() 
+        if genre != "Other" and details["total_weight"] > 0
+        for _ in range(details["total_weight"])
+    ]
     
-    if not all_subgenres:
-        return ["Could not find any sub-genres in your profile to search."]
+    if not weighted_genres:
+        return ["Could not find any genres in your profile to search."]
 
-    # Randomly select a number of sub-genres to explore
-    tags_to_explore = random.sample(all_subgenres, min(len(all_subgenres), subgenre_count))
+    tags_to_explore = set()
+    # Perform a weighted random selection of main genres
+    for _ in range(subgenre_count):
+        if not weighted_genres: break
+        chosen_genre = random.choice(weighted_genres)
+        
+        # Then, pick a random sub-genre from within that chosen main genre
+        subgenres_in_genre = list(genre_tree[chosen_genre]["subgenres"].keys())
+        if subgenres_in_genre:
+            tags_to_explore.add(random.choice(subgenres_in_genre))
+
+    if not tags_to_explore:
+        return ["Could not select any sub-genres to explore."]
+    # --- END NEW LOGIC ---
     
     final_recs = set()
     for tag in tags_to_explore:
-        # Get a list of artists for the randomly selected tag
         params = {'method': 'tag.gettopartists', 'tag': tag, 'api_key': LASTFM_API_KEY, 'format': 'json', 'limit': 100}
         response = requests.get('http://ws.audioscrobbler.com/2.0/', params=params)
         time.sleep(0.1)
@@ -101,7 +117,6 @@ def generate_recommendations(profile, popularity_cap, subgenre_count, artists_pe
             data = response.json()
             artist_pool = [artist['name'] for artist in data.get('topartists', {}).get('artist', [])]
             
-            # Randomly sample artists from this niche pool
             artists_to_check = random.sample(artist_pool, min(len(artist_pool), artists_per_subgenre))
 
             for artist_name in artists_to_check:
