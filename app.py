@@ -37,7 +37,7 @@ def build_user_profile(sp):
     top_artists_results = sp.current_user_top_artists(limit=50, time_range='long_term')
     seed_artists = [artist['name'] for artist in top_artists_results['items']]
     
-    yield "status", "taking a peek at your listening history..."
+    yield "status", "taking a peek under the hood..."
     yield "progress", 0.2
     all_liked_tracks = []
     liked_results = sp.current_user_saved_tracks(limit=50)
@@ -47,7 +47,7 @@ def build_user_profile(sp):
         all_liked_tracks.extend(liked_results['items'])
     exclusion_list = {artist['name'] for item in all_liked_tracks for artist in item['track']['artists']}
 
-    yield "status", "analyzing your taste..."
+    yield "status", "judging your taste..."
     yield "progress", 0.4
     tag_counts = Counter()
     for i, artist_name in enumerate(seed_artists):
@@ -68,7 +68,7 @@ def build_user_profile(sp):
                 genre_tree[genre]["total_weight"] += weight
                 break
     
-    yield "status", "Profile created!"
+    yield "status", "All done! Let's see what we can make for you."
     yield "progress", 1.0
     
     st.session_state.taste_profile = {
@@ -77,7 +77,7 @@ def build_user_profile(sp):
         "genre_tree": genre_tree
     }
 
-def generate_recommendations(profile, popularity_cap, selected_genres, similar_artist_limit, seed_artist_count):
+def generate_recommendations(profile, popularity_cap, similar_artist_limit, seed_artist_count):
     # This function now takes the profile from session_state
     seed_artists = profile.get("seed_artists", [])
     exclusion_list = set(profile.get("artist_exclusion_list", []))
@@ -90,7 +90,7 @@ def generate_recommendations(profile, popularity_cap, selected_genres, similar_a
             for genre, keywords in GENRE_MAP.items():
                 if any(keyword in tag.lower() for keyword in keywords):
                     genres.add(genre)
-        if len(genres) > 1 and (not selected_genres or any(g in genres for g in selected_genres)):
+        if len(genres) > 1: # Always include all bridge artists
             bridge_artists.append(artist_name)
         time.sleep(0.1)
 
@@ -166,15 +166,9 @@ elif not st.session_state.taste_profile:
         st.rerun() # Rerun the script to show the main app
 else:
     st.success("Your taste profile is loaded. Let's find some music!")
-    def load_genres():
-        genres = [g for g, d in st.session_state.taste_profile.get('genre_tree', {}).items() if d.get('total_weight', 0) > 0 and g != "Other"]
-        return sorted(genres)
-
+    
     st.sidebar.header("Recommendation Controls")
-    pop_cap = st.sidebar.slider("Popularity Cap", 10000, 1000000, 500000, 10000)
-    st.sidebar.subheader("Genre Bias")
-    genre_options = load_genres()
-    selected_genres = [g for g in genre_options if st.sidebar.checkbox(g, key=f"genre_{g}")]
+    pop_cap = st.sidebar.slider("Popularity Slider", 10000, 1000000, 500000, 10000)
     similar_artist_limit = st.sidebar.slider("Discovery Breadth", 5, 50, 25)
     seed_count = st.sidebar.slider("Number of Seed Artists", 5, 50, 15)
 
@@ -183,13 +177,14 @@ else:
         st.header("Step 2: Get Recommendations")
         if st.button("Find New Music"):
             with st.spinner("Analyzing profile and finding artists..."):
-                recs = generate_recommendations(st.session_state.taste_profile, pop_cap, selected_genres, similar_artist_limit, seed_count)
+                # Pass an empty list for selected_genres since we removed the UI for it
+                recs = generate_recommendations(st.session_state.taste_profile, pop_cap, [], similar_artist_limit, seed_count)
                 st.session_state.recommendations = recs
             st.success(f"Found {len(recs)} new songs!")
     with col2:
         st.header("Step 3: Create Playlist")
         if st.session_state.recommendations:
-            playlist_name = st.text_input("Playlist Name:", "Last.fm Discoveries")
+            playlist_name = st.text_input("Playlist Name:", "what shall we call you?")
             if st.button("Create Spotify Playlist"):
                 with st.spinner("Creating playlist..."):
                     message = create_spotify_playlist(st.session_state.sp, st.session_state.recommendations, playlist_name)
