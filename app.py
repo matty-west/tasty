@@ -177,8 +177,8 @@ else:
         st.header("Step 2: Get Recommendations")
         if st.button("Find New Music"):
             with st.spinner("Analyzing profile and finding artists..."):
-                # Pass an empty list for selected_genres since we removed the UI for it
-                recs = generate_recommendations(st.session_state.taste_profile, pop_cap, [], similar_artist_limit, seed_count)
+                # CORRECTED: The extra '[]' argument has been removed
+                recs = generate_recommendations(st.session_state.taste_profile, pop_cap, similar_artist_limit, seed_count)
                 st.session_state.recommendations = recs
             st.success(f"Found {len(recs)} new songs!")
     with col2:
